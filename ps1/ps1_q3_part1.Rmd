@@ -1,0 +1,126 @@
+---
+title: "Monte Carlo Simulations"
+output: pdf_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+if (!require("pacman")) install.packages("pacman"); library(pacman)
+p_load(data.table,stats,ggplot2,MetBrewer)
+
+```
+
+## Monte Carlo Simulations
+
+Consider the model $Y_{i}=X_{i}^{\prime} \beta+U_{i}$, where $U_{i} \mid X_{i} \stackrel{i . i . d .}{\sim} \mathcal{N}\left(0, \sigma^{2}\right)$.
+
+(a) Set $\beta=(2,3)^{\prime}$ and $\sigma^{2}=4$. Generate $N=10,000$ values for $X \in \mathbb{R}^{2}$ (one constant and one covariate). Given your value of $\sigma^{2}$, draw $U$ 's (they may be independent of $X$ ). Finally, compute $Y$ 's. Estimate $\hat{\beta}$ and its standard errors from your data using OLS.
+(b) Using $X, \beta$ and $\sigma^{2}$ from part (a), draw $S=10,000$ of $U^{(s)}$ (an $N \times 1$ vector for each $\left.s\right)$ and the corresponding $Y^{(s)}$. For each $Y^{(s)}$, compute the OLS estimator $\hat{\beta}^{(s)}$. Then, compute:
+
+### Part a) 
+
+```{r partA_OLS} 
+beta_0 = 2
+beta_1 = 3
+
+sd = 4
+
+n = 10000
+
+## simulate X_i
+x_0 <- rep(1,n)
+x_1 <- runif(n)
+
+## simulate U_i
+u_i <- rnorm(n=n,sd=sd)
+
+y <- beta_0 + beta_1*x_1+ u_i
+
+data <- data.table(y,x_0,x_1,u_i)
+estimates <- lm(y~x_0 + x_1,data=data)
+
+beta_0hat <- coef(estimates)["(Intercept)"]
+beta_1hat <- coef(estimates)["x_1"]
+
+se_beta_0hat <- summary(estimates)$coefficients["(Intercept)",2]
+se_beta_1hat <- summary(estimates)$coefficients["x_1",2]
+
+
+```
+
+We can estimate $\hat{\beta}$ with OLS, which gives  $\hat{\beta}'$ = (`r beta_0hat`, `r beta_1hat`) with standard errors  (`r se_beta_0hat`, `r se_beta_1hat`) respectively.
+
+## Part b)
+$$
+\sqrt{\widehat{\operatorname{Var}}\left[\hat{\beta}_{k}^{(s)} \mid X_{1}, \ldots, X_{N}\right]}=\sqrt{\frac{1}{S} \sum_{s=1}^{S}\left(\hat{\beta}_{k}^{(s)}\right)^{2}-\left(\frac{1}{S} \sum_{s=1}^{S} \hat{\beta}_{k}^{(s)}\right)^{2}} \stackrel{p}{\rightarrow} \operatorname{se}\left(\hat{\beta}_{k} \mid X_{1}, \ldots, X_{N}\right)
+$$
+
+Now we do this with some bootstrapping 
+
+
+```{r partB}
+
+s = 10000
+
+## replicate these covariate vectors S times
+MC_x_0 <- rep(x_0,s)
+MC_x_1 <- rep(x_1,s)
+
+
+## simulate U_i
+MC_u_i <- rnorm(n=n*s,sd=sd)
+
+## make the MC iteration 
+MC_id <- rep(1:s,each=n)
+
+MC_y <- beta_0 + beta_1*MC_x_1+ MC_u_i
+
+MC_data <- data.table(MC_y,MC_x_0,MC_x_1,MC_u_i,MC_id)
+
+get_coefs <- function(estimates) {
+  b_0 <- coef(estimates)[1]
+  b_1 <- coef(estimates)[2]
+  
+  list(b_0,b_1)
+}
+
+MC_data[, 
+        c("hat_b0", "hat_b1") := get_coefs(lm(MC_y~ MC_x_1,data=.SD)), 
+        by = MC_id]
+
+
+MC_se_b0 = MC_data[,sqrt(var(hat_b0))]
+MC_se_b1 = MC_data[,sqrt(var(hat_b1))]
+
+MC_data <- MC_data[,.(MC_id,hat_b0,hat_b1,MC_se_b0,MC_se_b1)]
+setkey(MC_data,MC_id)
+MC_data <- unique(MC_data)
+```
+
+We have the Monte Carlo estimates for the standard error: $\sigma_{\beta_0}^{MC} =$ `r MC_se_b0` and $\sigma_{\beta_1}^{MC} =$ `r MC_se_b1`. 
+
+
+Justify the " $\stackrel{p}{\rightarrow}$ " in the line above. Plot a histogram for the first component of $\beta^{(s)}$.
+
+```{r histogram}
+
+        
+ggplot(MC_data,aes(x=hat_b0)) +
+  geom_histogram(fill=met.brewer('Hiroshige')[6]) +
+  geom_vline(xintercept = 2, color =met.brewer('Hiroshige')[1]) +
+  xlab(expression("Monte Carlo Distribution"~beta)) + 
+  theme_minimal() +
+  theme(axis.title.y = element_blank())
+
+ggsave("/Users/dylan/Documents/coursework/core/metrics 3/pset submissions/figures/p1.3.b_hist_beta0.png")   
+
+ggplot(MC_data,aes(x=hat_b1)) +
+  geom_histogram(fill=met.brewer('Hiroshige')[8]) +
+  geom_vline(xintercept = 3, color =met.brewer('Hiroshige')[1]) +
+  xlab(expression("Monte Carlo Distribution"~beta)) + 
+  theme_minimal() +
+  theme(axis.title.y = element_blank())
+
+ggsave("/Users/dylan/Documents/coursework/core/metrics 3/pset submissions/figures/p1.3.b_hist_beta1.png")
+```
