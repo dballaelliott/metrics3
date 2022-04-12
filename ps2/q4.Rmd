@@ -1,0 +1,336 @@
+---
+title: "Problem Set 2, Question 4"
+description: |
+  On Bunching and Identification of the Taxable Income Elasticity
+author:
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default 
+  #tufte::tufte_html: default
+  #distill::distill_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+if (!require("pacman")) install.packages("pacman"); library(pacman)
+p_load(data.table,ggplot2,scales,ggforce,ggrepel,latex2exp)
+```
+
+## Part A)
+
+a)  We start by reading in the data and plotting a histogram
+
+```{r data, echo=FALSE}
+dt <- fread("IncomeData.csv")
+dt <- dt[,"Y"]
+setnames(dt,new="income")
+
+## for the purposes of visualization, drop extreme outliers
+# dt[,p99.99 := quantile(income,probs=0.9999)]
+
+## PART A) 
+# trim the data slightly for the sake of making the histogram interpretable
+inc_max <- 100000
+dt[income<inc_max] |> 
+  ggplot(aes(x=income)) +
+  geom_histogram(binwidth = 500,fill = '#B0C4B1', alpha = 1) +
+  geom_vline(xintercept =20000, color = 'black', alpha = .5, linetype = "dotdash") + 
+  geom_vline(xintercept =18000, color = 'black', alpha = .35, linetype = "solid") + 
+  geom_vline(xintercept =22000, color = 'black', alpha = .35, linetype = "solid") + 
+  theme_minimal()+
+  theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+  scale_x_continuous(limits = c(NA,inc_max), labels = label_dollar()) + 
+  scale_y_continuous(breaks = NULL) +
+  xlab("Income ($USD)")
+
+ggsave("~/Documents/coursework/core/metrics 3/code/ps2/figs/q4_hist.png")
+
+
+```
+
+## Part B)
+
+<!-- *Assume isoelastic utility model and budget set kink at* $K = \$20000$ with net of tax rate of 100% before the kink and 80% after the kink. Furthermore, assume that the excluded range is [18000, 22000]. -->
+
+<!-- From the paper, we parametrize the isoelastic utility as $U(c,y,\eta) = c - \frac{\eta}{1 + \beta^{-1}}\left(\frac{y}{\eta}\right)^{1+\beta^{-1}}$ -->
+
+Using the methods described in the paper, we compute estimates for $f^{−}(18000)$ and $f^{+}(22000)$ and bunching probability $P_K$.
+
+In particular, for the purposes of estimation, we take the excluded range $[y_1,y_2] = [18000, 22000]$. We estimate the densities following 
+
+\begin{align*}
+\hat{f}^{−}(18000) &= \frac{1}{N(K-y_1)}\sum_{n=1}^{N} \mathbf{1}\{y_n \in [y_1 - (K-y_1),y_1)\} \\ 
+\hat{f}^{+}(22000) &= \frac{1}{N(y_2-K)}\sum_{n=1}^{N} \mathbf{1}\{y_n \in (y_2,y_2 + (y_2-K)]\} \\ 
+\hat{P}_K &= \frac{1}{N(y_2-y_1)}\sum_{n=1}^{N} \mathbf{1}\{y_n \in [y_1,y_2]\} - \frac{1}{2}\left(\hat{f}^{−}(18000) + \hat{f}^{+}(22000)\right)
+\end{align*}
+
+```{r partb}
+## PART B)
+# estimate bunching probabilities
+# P_K <- (dt[,mean(income == 20000)] *100) |> round(2)
+
+f_minus <- (dt[,mean(income >=16000 &  income < 18000)]/2000) 
+f_plus <- (dt[,mean(income >= 22000 & income < 24000)]/2000) 
+
+P_K <- (dt[,mean(income >= 18000 & income <= 22000)] - 2000*(f_minus + f_plus))
+
+```
+
+From the methods in the paper, we estimate a excess density of $P_K = `r sprintf("%.3f", P_K) `$ in the excluded region. We also estimate the counter-factual densities $f^-(18000) = `r sprintf("%.6f", f_minus)`$ and $f^+(22000) = `r sprintf("%.6f", f_plus)`$. We use these counterfactual densities to estimate the excess mass at the kink.
+
+## Part C)
+
+We are interested in using our estimate of $P_K$ to estimate the taxable income elasticity under various assumptions on the density in the excluded range. Recall that we map our structural parameters into the reduced form object $P_K$ via the equation $P_K = \int_{\eta_l}^{\eta_h} \phi(\eta) d\eta$.
+
+We now impose further structure on $\phi(\eta)$ in the excluded range to identify $\beta$. 
+
+### Model 1
+$\phi^1(\eta)=\phi\left(\eta_{1}\right)+\frac{\eta-\eta_{1}}{\eta_{2}-\eta_{1}}\left(\phi\left(\eta_{2}\right)-\phi\left(\eta_{1}\right)\right), \eta \in\left[\eta_{1}, \eta_{2}\right]$
+
+We substitute this density into the given integral, which gives
+\begin{align*}
+P_K &= \int_{\eta_1}^{\eta_2} \phi^1(\eta) d\eta \\ 
+&= \frac{1}{2}(\eta_2 - \eta_1)(\phi(\eta_2) - \phi(\eta_1))
+\end{align*}
+
+Bloomquist et al show that we can estimate the parameters $\eta_1;~\eta_2$ and densities $\phi(\eta_1);~\phi(\eta_2)$ using our parameter values for $\rho$ and $\beta$ and our estimates
+of the densities at the endpoints of the excluded range via the mappings
+$\eta_{1} =y_{1} \rho_{1}^{-\beta}; \eta_{2} =y_{2} \rho_{2}^{-\beta}$
+which implies 
+$\phi\left(\eta_{1}\right)=f^{-}\left(y_{1}\right) \rho_{1}^{\beta};~ \phi\left(\eta_{2}\right)=f^{+}\left(y_{2}\right) \rho_{2}^{\beta}$. 
+
+Subsituting in these expressions yields
+$P_K = \frac{1}{2}(y_{2} \rho_{2}^{-\beta} - y_{1})(f^{+}\left(y_{2}\right) \rho_{2}^{\beta} - f^{-}\left(y_{1}\right))$ 
+
+where we are able to elimate all of the $\rho_1$ terms, since we have set $\rho_1=1$. 
+
+```{r partc_model1}
+## PART C
+## We want to numerically solve for beta given the different models of the density
+## across the excluded range 
+
+# numerical optimization hyperparameters 
+y_1 = 18000
+y_2 = 22000
+rho_2 = .8
+
+precision <- 100
+beta_space <- 0:(2*precision)/precision
+
+# Model 1
+model_1 <- function(beta){
+  .5*(y_2*(rho_2**(-beta) ) - y_1)*(f_plus*(rho_2**beta) + f_minus)
+}
+
+# get the loss minimizing beta
+beta_1 = beta_space[which.min(abs(model_1(beta_space) - P_K))]
+
+```
+
+We can estimate $P_K, f^{+}, f^-$ and $\rho_2, y_1, y_2$ are known, which allows us
+to solve for $\beta$ numerically. Numerically solving this equation with our 
+estimates of $\hat{P_K}, \hat{f}^{+}, \hat{f}^-$ yields $\beta^1 = `r beta_1`$.
+
+### Model 2
+$\phi(\eta)= \begin{cases}\phi\left(\eta_{1}\right) & , \eta \in\left[\eta_{1}, \frac{1}{4} \eta_{1}+\frac{3}{4} \eta_{2}\right] \\ \phi\left(\eta_{1}\right)+\frac{\eta-\left(\frac{1}{4} \eta_{1}+\frac{3}{4} \eta_{2}\right)}{\eta_{2}-\left(\frac{1}{4} \eta_{1}+\frac{3}{4} \eta_{2}\right)}\left(\phi\left(\eta_{2}\right)-\phi\left(\eta_{1}\right)\right) & , \eta \in\left(\frac{1}{4} \eta_{1}+\frac{3}{4} \eta_{2}, \eta_{2}\right]\end{cases}$
+
+We proceed somewhat more quickly through specifications $2$ and $3$. 
+
+Plugging model 2 into the integral and rearranging terms yields the expression 
+
+$(\eta_2-\eta_1)(\frac{7}{8}\phi(\eta_1) + \frac{1}{8}\phi(\eta_2))$ 
+
+We can link this to our reduced form densities by rewriting this as 
+
+$(y_{2} \rho_{2}^{-\beta} - y_{1})(\frac{7}{8}f^{-}\left(y_{1}\right) + \frac{1}{8}f^{+}\left(y_{2}\right) \rho_{2}^{\beta})$ 
+
+
+```{r partc_model2}
+### model 2
+model_2 <- function(beta){
+  (y_2*(rho_2**(-beta)) - y_1)*((7/8)*f_minus + (1/8)*f_plus*(rho_2**beta) )
+}
+
+# get the loss minimizing beta
+beta_2 = beta_space[which.min(abs(model_2(beta_space) - P_K))]
+```
+
+As before, we can numerically solve this, which yields $\beta^2 = `r beta_2`$.
+
+<aside>
+We use a standard numerical optimization algorithm for a single parameter:
+`x = argmin loss(X)` where our loss function is defined over values of $\beta$
+as the absolute difference between the $P_K$ given by the analytic expression above, 
+evaluated at that parameter value, and the value of $\hat{P}_K$ estimated from the
+data.
+</aside>
+
+### Model 3
+
+$\phi(\eta)= \begin{cases}\phi\left(\eta_{1}\right)+\frac{\eta-\eta_{1}}{\frac{3}{4} \eta_{1}+\frac{1}{4} \eta_{2}-\eta_{1}}\left(\phi\left(\eta_{2}\right)-\phi\left(\eta_{1}\right)\right) & , \eta \in\left[\eta_{1}, \frac{3}{4} \eta_{1}+\frac{1}{4} \eta_{2}\right] \\ \phi\left(\eta_{2}\right) & , \eta \in\left(\frac{3}{4} \eta_{1}+\frac{1}{4} \eta_{2}, \eta_{2}\right]\end{cases}$
+
+
+Plugging model 3 into the integral and rearranging terms yields the expression 
+
+$(\eta_2-\eta_1)(\frac{1}{8}\phi(\eta_1) + \frac{7}{8}\phi(\eta_2))$ 
+
+We can link this to our reduced form densities by rewriting this as 
+
+$(y_{2} \rho_{2}^{-\beta} - y_{1})(\frac{1}{8}f^{-}\left(y_{1}\right) + \frac{7}{8}f^{+}\left(y_{2}\right) \rho_{2}^{\beta})$ 
+
+```{r partc_model3}
+### model 3
+model_3 <- function(beta){
+  (y_2*(rho_2**(-beta)) - y_1)*((1/8)*f_minus + (7/8)*f_plus*(rho_2**beta) )
+}
+
+# get the loss minimizing beta
+beta_3 = beta_space[which.min(abs(model_3(beta_space) - P_K))]
+
+
+### Plot all three models and their predictions 
+
+dt_partC <- data.table(
+  "beta" = beta_space,
+  "pk_1" = model_1(beta_space),
+  "pk_2" = model_2(beta_space),
+  "pk_3" = model_3(beta_space)
+)
+
+
+ggplot(dt_partC, aes(x=beta)) + 
+  geom_line(aes(y = pk_1,color = "Model 1")) + 
+  geom_line(aes(y = pk_2,color = "Model 2")) + 
+  geom_line(aes(y = pk_3,color = "Model 3")) + 
+  geom_hline(aes(yintercept=P_K)) + 
+  geom_text(aes(y=P_K,x=0,
+            label = TeX(
+              paste0(r"($\hat{P}_K)", " = ", 
+              round(P_K,3), r"($)"),
+              output='character') 
+            ),
+            parse = TRUE,
+            hjust=0,vjust =0) +
+  theme_minimal() + 
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  theme(legend.position = c(0.10, 0.8)) + 
+  ylab(expression(P[K])) + 
+  xlab(expression(beta))+
+  facet_zoom(xy= (pk_2 < 1.25*P_K) ) + 
+  guides(color=guide_legend(title=NULL))
+
+ggsave("~/Documents/coursework/core/metrics 3/code/ps2/figs/q4_models.png")
+
+  # scale_y_continuous(limits = c(P_K*.8,P_K*1.2))
+   
+ 
+```
+
+With this model, we recover a numeric estimate for the elasticity $\beta = `r beta_3`$. 
+
+
+## Part D 
+
+To restate the estimates from above for specifications 1,2,3 of the utility across
+the excluded range, we have 
+
+\begin{align*}
+\beta^1 &= `r beta_1` \\ 
+\beta^2 &= `r beta_2` \\ 
+\beta^3 &= `r beta_3`
+\end{align*}
+
+These are relatively small changes in how we parametrize the density: we are looking at different weighted averages of the endpoint densities $\phi(\eta_1)$ and $\phi(\eta_2)$ -- choosing a value close to the density at the upper bound gives an estimate $\beta^3 = `r beta_3`$, that is nearly four times smaller than the estimate $\beta^2 = `r beta_2`$ when the counterfactual density is assumed to be closer to the density at the upper lower.
+
+Intuitively, when we assume that counterfactually there is less mass in the excluded range (and the counterfactual desnsity looks more like the estimate at the left boundary), then the model requires agents to be quite elastic to generate the observed mass. However, if we assume counterfactually that there is relatively more mass (i.e. the counteractual density is closer to the density at the right boundary), then much less elastic consumers will generate the same mass in the excluded region.
+
+This suggests that $\beta$ is not point indentified, since it performs poorly in this sensitivity test. That is, even forcing the density to lie in the convex hull of the densities at the endpoints, relatively small (and *ex-ante* reasonable) changes in the assumptions on the counterfactual density across the excluded range generates large differences in our estimated elasticities. We've thus shown that $\beta$ is not identified. 
+
+## Part E 
+
+We can numerically solve for the bounds. From Bloomquist et al, we solve numerically 
+for $\beta_l$ and $\beta_h$ that solve 
+
+$\max\{\hat{D}^-(\hat{\beta}_l), \hat{D}^+(\hat{\beta}_l) \} = P_K$ 
+and 
+$\min\{\hat{D}^-(\hat{\beta}_u), \hat{D}^+(\hat{\beta}_u) \} = P_K$
+
+where 
+$\hat{D}^-(\beta) = f^-(y_1)\left[ y_2\left( \frac{\rho_1}{\rho_2} \right)^\beta - y_1 \right]$
+and 
+$\hat{D}^+(\beta) = f^+(y_2)\left[ y_2 - y_1 \left( \frac{\rho_2}{\rho_1} \right)^\beta\right]$
+
+```{r partE}
+
+## numerically solve for the upper and lower bounds of beta 
+d_minus <- function(beta){
+  f_minus*(y_2*((1/rho_2)**beta) - y_1)
+}
+
+d_plus <- function(beta){
+    f_plus*(y_2 - y_1*((rho_2)**beta))
+}
+
+dt_partE <- data.table(
+  "beta" = beta_space,
+  "d_m" = d_minus(beta_space),
+  "d_p" = d_plus(beta_space)
+)
+
+dt_partE[,min := pmin(d_m,d_p)]
+dt_partE[,max := pmax(d_m,d_p)]
+
+beta_ub = dt_partE[which.min(abs(min-P_K)),beta]
+beta_lb = dt_partE[which.min(abs(max-P_K)),beta]
+
+
+ggplot(dt_partE,aes(x=beta)) +
+  geom_line(aes(y=min,color= "UB"),alpha=.85) + 
+  geom_line(aes(y=max,color= "LB"),alpha=.85) + 
+  geom_hline(aes(yintercept=P_K)) +
+  geom_text(aes(y=P_K,x=0,
+            label = TeX(
+              paste0(r"($\hat{P}_K)", " = ", 
+              round(P_K,3), r"($)"),
+              output='character') 
+            ),
+            parse = TRUE,
+            hjust=0,vjust =0) +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+  theme(legend.position = c(0.15, 0.8)) +
+  ylab(expression(P[K])) +
+  xlab(expression(beta))+
+  facet_zoom(xy= (min < 1.25*P_K)) +
+  guides(color=guide_legend(title=NULL)) + 
+  scale_color_discrete(labels=
+      list(TeX(r'(Lower Bound: Max($D^-(\beta),D^+(\beta)))'),
+           TeX(r'(Upper Bound: Min($D^-(\beta)-,D^+(\beta)))'))
+    )
+
+ggsave("~/Documents/coursework/core/metrics 3/code/ps2/figs/q4_bounds.png")
+
+```
+Numerically solving these equations gives bounds  $\beta_l = `r beta_lb`$ and $\beta_u = `r beta_ub`$. Imposing monotonicity disciplines the counterfactual density and in particular imposes limits on the maximum and values that this density can attain over the excluded region. 
+
+In particular, the lower bound on the elasticity corresponds to the case where the density immediately attains the value at its right boundary (and thus there is relatively more counterfactual mass in the excluded region) and the upper bound to the case where the density is flat at the value at the left boundary across the whole region. If we allow the density to take even greater (or lesser) values, then our bounds will get even wider. 
+
+
+### Part F 
+
+The linearity assumption on $\phi$ is not restrictive when the range $[\eta_1,\eta_2]$ is small. Ignoring misoptimization error, this range can be written in terms of $\beta$ as $[K\rho_1^{-\beta},K\rho_2^{-\beta}]$. And since we have $\rho_1,\rho_2 < 1$, this range is increasing in $\beta$, so this interval is small when $\beta$ is small. 
+
+If we restrict the density to be linear through the excluded region, then we have exactly the density given by Model 1 in Part C. But in order to think that this estimate is the true parameter, we need to assume that it is small, which is circular. 
+
+Additionally, while we can write the interval in terms of $\beta$, we cannot write a formal condition for when the interval is ``small''. And, even if we could, this would require us to first assume that $\beta$ is less than some maximum before we can estimate $\beta$. 
+
+So, justifying the linearity assumption by asserting that the affected interval of $\eta$ is small is equivalent to restricting that $\beta$ is also small, which ultimately does not let escape the fact that we need to impose further structure on the model in order to identify the parameter of interest from the moment conditions we can estimate. 
+
+# Appendix: Code for Question 4 {.appendix}
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
