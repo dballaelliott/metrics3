@@ -5,15 +5,15 @@ description: |
 author:
 date: "`r Sys.Date()`"
 output:
-  pdf_document: default 
+  #pdf_document: default 
   #tufte::tufte_html: default
-  #distill::distill_article
+  distill::distill_article
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 if (!require("pacman")) install.packages("pacman"); library(pacman)
-p_load(data.table,ggplot2,scales,ggforce,ggrepel,latex2exp)
+p_load(data.table,ggplot2,scales,ggforce,ggrepel,latex2exp,MetBrewer)
 ```
 
 ## Part A)
@@ -204,7 +204,7 @@ ggplot(dt_partC, aes(x=beta)) +
   geom_line(aes(y = pk_1,color = "Model 1")) + 
   geom_line(aes(y = pk_2,color = "Model 2")) + 
   geom_line(aes(y = pk_3,color = "Model 3")) + 
-  geom_hline(aes(yintercept=P_K)) + 
+  geom_hline(aes(yintercept=P_K),color="#4C566A") + 
   geom_text(aes(y=P_K,x=0,
             label = TeX(
               paste0(r"($\hat{P}_K)", " = ", 
@@ -212,7 +212,8 @@ ggplot(dt_partC, aes(x=beta)) +
               output='character') 
             ),
             parse = TRUE,
-            hjust=0,vjust =0) +
+            hjust=0,vjust =0,
+            color = "#4C566A") +
   theme_minimal() + 
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank()) +
@@ -220,7 +221,8 @@ ggplot(dt_partC, aes(x=beta)) +
   ylab(expression(P[K])) + 
   xlab(expression(beta))+
   facet_zoom(xy= (pk_2 < 1.25*P_K) ) + 
-  guides(color=guide_legend(title=NULL))
+  guides(color=guide_legend(title=NULL)) + 
+  scale_color_manual(values = met.brewer("Cross",n=3,type='discrete'))
 
 ggsave("~/Documents/coursework/core/metrics 3/code/ps2/figs/q4_models.png")
 
@@ -290,7 +292,7 @@ beta_lb = dt_partE[which.min(abs(max-P_K)),beta]
 ggplot(dt_partE,aes(x=beta)) +
   geom_line(aes(y=min,color= "UB"),alpha=.85) + 
   geom_line(aes(y=max,color= "LB"),alpha=.85) + 
-  geom_hline(aes(yintercept=P_K)) +
+  geom_hline(aes(yintercept=P_K),color="#4C566A") +
   geom_text(aes(y=P_K,x=0,
             label = TeX(
               paste0(r"($\hat{P}_K)", " = ", 
@@ -298,7 +300,8 @@ ggplot(dt_partE,aes(x=beta)) +
               output='character') 
             ),
             parse = TRUE,
-            hjust=0,vjust =0) +
+            hjust=0,vjust =0,
+            color = "#4C566A") +
   theme_minimal() +
   theme(panel.grid.major = element_blank(),
         panel.grid.minor = element_blank()) +
@@ -307,10 +310,13 @@ ggplot(dt_partE,aes(x=beta)) +
   xlab(expression(beta))+
   facet_zoom(xy= (min < 1.25*P_K)) +
   guides(color=guide_legend(title=NULL)) + 
-  scale_color_discrete(labels=
+  scale_color_manual(
+    values=met.brewer("Cross",n=2,type='discrete'),
+    labels=
       list(TeX(r'(Lower Bound: Max($D^-(\beta),D^+(\beta)))'),
            TeX(r'(Upper Bound: Min($D^-(\beta)-,D^+(\beta)))'))
-    )
+    ) 
+      
 
 ggsave("~/Documents/coursework/core/metrics 3/code/ps2/figs/q4_bounds.png")
 
