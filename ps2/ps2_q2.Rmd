@@ -1,30 +1,329 @@
 ---
-title: "PS2 Q2"
-author: "Jun Wong"
-date: "4/7/2022"
-output: pdf_document
+title: ""
+output: 
+  pdf_document: 
+    keep_tex: yes
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r setup, results='hide', message=FALSE, warning=FALSE}
+library(haven)
+library(MatchIt)
+library(stargazer)
+library(tidyverse)
+
+df <- read_dta("lalonde2.dta")
+
+#################
+### Functions ###
+#################
+
+# Loop over ttests
+testing <- function(data, var){
+  temp0 = filter(data, variables==var & treated==0) %>% 
+    select(values)
+  temp1 = filter(data, variables==var & treated==1) %>% 
+    select(values)
+  test = t.test(temp0, temp1)
+  output <- data.frame(var, round(test$estimate[1], 3), 
+                       round(test$estimate[2], 3), round(test$p.value, 3))
+  return(output)
+}
+
+# Create t.test table
+test.table <- function(data, vars, filename) {
+  tests <- lapply(vars, testing, data=data)
+  tests <- data.table::rbindlist(tests)
+  table <- knitr::kable(tests, "latex", vline="", linesep="", 
+                        toprule="\\hline \\hline", bottomrule = "\\hline \\hline", 
+                        col.names=c("Variable", "Control", 
+                                    "Treated", "$p$-value"), 
+                        escape=F)
+  writeLines(table, filename)
+}
+
+# Plot covariate balance
+covar.balance <- function(data, vars, color, filename){
+  df <- data %>% 
+  group_by(treated, variables) %>% 
+  summarize(avg = mean(values),
+            std = sd(values),
+            num = n()) %>% 
+  mutate(se = std/sqrt(num)) %>% 
+  filter(variables %in% vars)
+  
+  p <- ggplot(df, aes(x=treated, group=treated)) + 
+    geom_point(aes(y=avg), color=color) + 
+    geom_errorbar(aes(ymin=avg-1.96*se, ymax=avg+1.96*se), width=.2,
+                 position=position_dodge(.9), color=color) +
+    facet_wrap( ~ variables, scales="free", ncol=3) + 
+    theme_minimal() +
+    labs(x="Treated", y="Values")
+  ggsave(p, filename=filename)
+}
+
+# Smooth out earnings by propensity score using local linear regression
+loclin <- function(data, t){
+  data <- filter(data, treated == t)
+  lp <- loess(re78 ~ prop_score, data = data, degree = 1)
+  data$smoothed_re78 <- predict(lp)
+  return(data)
+}
+
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+What covariates do we care about?
+```{r,results='hide', message=FALSE, warning=FALSE}
+# Specify covariates
+covars <- c("age", "black", "hisp", "educ", "married", "re74", "kids18", 
+            "kidmiss", "nodegree", "w76", "re75")
+newnames <- c("Age", "Black", "Hispanic", "Education", "Married", 
+              "Earnings in 1974", "Kids 18", "Kid Miss", "No Degree",
+              "Employed in 1976", "Earnings in 1975")
+cont_covars <- c("Age", "Education", "Earnings in 1974", "Kids 18", 
+                 "Earnings in 1975")
 ```
 
-## Including Plots
+Where do we cut off propensity scores?
+```{r,results='hide', message=FALSE, warning=FALSE}
+phigh=0.95
+plow=0.05
 
-You can also embed plots, for example:
+phigh_alt = 0.6
+plow_alt = 0.1
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+final_high = phigh_alt
+final_low = plow
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+Pretty colors:
+```{r,results='hide', message=FALSE, warning=FALSE}
+color.pal <- c("#CADF9E", "#001B2E", "#294C60", "#087E8B", "#7F636E")
+```
+
+
+## A: Test covariate balance in NSW sample
+```{r,results='hide', message=FALSE, warning=FALSE}
+df_experimental <- df %>% 
+  filter(sample==1)
+
+df_exp_long <- df_experimental %>% 
+  pivot_longer(-c("treated", "idnum", "sample"), names_to = "variables", 
+               "values_to" = "values") %>% 
+  mutate(treated=as.factor(treated)) %>% 
+  mutate(variables=plyr::mapvalues(variables, from=covars, to=newnames))
+
+# test table
+test.table(df_exp_long, newnames, filename="ps2_q2a.tex")
+
+# plots
+covar.balance(df_exp_long, newnames, color.pal[3], "ps2_q2a.pdf")
+```
+
+## B: Estimating effect using experimental sample
+
+```{r,results='hide', message=FALSE, warning=FALSE}
+att1 <- lm(re78 ~ treated, data=df_experimental)
+control_formula <- paste("re78 ~ treated +", paste(covars, collapse="+"))
+att2 <- lm(control_formula, data=df_experimental)
+stargazer(att1, att2, covariate.labels=c("ATT", "Constant"), no.space=T,
+          header=F, keep.stat="n", dep.var.caption="", float=F,
+          dep.var.labels.include=F, omit=covars, 
+          star.cutoffs = c(0.1, 0.05, 0.01), 
+          add.lines = list(c("Controls", "No", "Yes")),
+          out="ps2_q2b.tex")
+```
+
+
+## C: Estimate effect with NSW and CPS samples
+
+CPS as controls:
+```{r,results='hide', message=FALSE, warning=FALSE}
+df_cps <- df %>% 
+  filter(sample<= 2 & (treated==1 | is.na(treated))) %>% 
+  mutate(treated = ifelse(is.na(treated), 0, treated))
+
+att_cps1 <- lm(re78 ~ treated, data=df_cps)
+
+control_formula <- paste("re78 ~ treated +", paste(covars, collapse="+"))
+att_cps2 <- lm(control_formula, data=df_cps)
+stargazer(att_cps1, att_cps2, covariate.labels=c("ATT", "Constant"), no.space=T,
+          header=F, keep.stat="n", dep.var.caption="", float=F,
+          dep.var.labels.include=F, omit=covars, 
+          star.cutoffs = c(0.1, 0.05, 0.01), 
+          add.lines = list(c("Controls", "No", "Yes")),
+          out="ps2_q2c.tex")
+```
+
+## D: Investigate covariate balancing and support
+```{r,results='hide', message=FALSE, warning=FALSE}
+# check for covariate balancing
+df_cps_long <- df_cps %>% 
+  pivot_longer(-c("treated", "idnum", "sample"), names_to = "variables", 
+               "values_to" = "values") %>% 
+  mutate(treated=as.factor(treated),
+         sample_factor= ifelse(sample==1, "Experimental", "CPS")) %>% 
+  group_by(treated, variables) %>% 
+  ungroup() %>% 
+  mutate(variables=plyr::mapvalues(variables, from=covars, to=newnames))
+
+# test table
+test.table(df_cps_long, newnames, filename="ps2_q2d.tex")
+
+# plots
+covar.balance(df_cps_long, newnames, color.pal[3], "ps2_q2d_1.pdf")
+
+# check for common support of only continuous variables
+df_cps_long <- df_cps_long %>% 
+  filter(variables %in% cont_covars)
+
+p <- ggplot(df_cps_long) + 
+  geom_histogram(aes(values, after_stat(density), fill=sample_factor), alpha=0.5) +
+    scale_fill_manual(values=color.pal[c(1,3)]) +
+  facet_wrap( ~ variables, scales="free", ncol=3) + 
+  theme_minimal() + theme(legend.position="bottom") +
+  labs(x="Values", y="Density", fill="Sample")
+ggsave(p, filename="ps2_q2d_2.pdf")
+```
+
+## E: 1 nearest neighbor propensity score matching
+
+Step 1: Let's first estimate the propensity score
+```{r,results='hide', message=FALSE, warning=FALSE}
+ps_formula <- as.formula(paste("treated ~ ", paste(covars, collapse="+")))
+# draw with replacement
+ps_match <- matchit(ps_formula, data = df_cps,
+                 method = "nearest", distance = "glm", replace=T, link="probit")
+df_cps <- cbind(df_cps, prop_score=ps_match$distance)
+```
+
+Step 2: Now check common support
+```{r,results='hide', message=FALSE, warning=FALSE}
+p <- ggplot() + 
+  geom_histogram(data=filter(df_cps, treated==1), 
+                 aes(x = prop_score, y=after_stat(density)),
+                 fill=color.pal[1], alpha=0.7) + 
+  geom_histogram(data=filter(df_cps, treated==0), 
+                 aes(x = prop_score, y=-after_stat(density)),
+                 fill=color.pal[3], alpha=0.7) +
+  theme_minimal() +
+  labs(x="Values", y="Density")
+ggsave(p, filename="ps2_q2e_1.pdf")
+
+# How does it look trimmed?
+p <- ggplot() + 
+  geom_histogram(data=filter(df_cps, treated==1 & prop_score>plow & 
+                               prop_score<phigh), 
+                 aes(x = prop_score, y=after_stat(density)),
+                 fill=color.pal[1], alpha=0.7) + 
+  geom_histogram(data=filter(df_cps, treated==0 & prop_score>plow & 
+                               prop_score<phigh), 
+                 aes(x = prop_score, y=-after_stat(density)),
+                 fill=color.pal[3], alpha=0.7) +
+  theme_minimal() +
+  labs(x="Values", y="Density")
+ggsave(p, filename="ps2_q2e_2.pdf")
+
+# Alternate trimming:
+p <- ggplot() + 
+  geom_histogram(data=filter(df_cps, treated==1 & prop_score>plow_alt & 
+                               prop_score<phigh_alt), 
+                 aes(x = prop_score, y=after_stat(density)),
+                 fill=color.pal[1], alpha=0.7) + 
+  geom_histogram(data=filter(df_cps, treated==0 & prop_score>plow_alt & 
+                               prop_score<phigh_alt), 
+                 aes(x = prop_score, y=-after_stat(density)),
+                 fill=color.pal[3], alpha=0.7) +
+  theme_minimal() +
+  labs(x="Values", y="Density")
+ggsave(p, filename="ps2_q2e_3.pdf")
+```
+
+Step 3: One to one matching with replacement 
+```{r,results='hide', message=FALSE, warning=FALSE}
+df_knn <- match.data(ps_match) %>% 
+  filter(prop_score>final_low & prop_score<final_high)
+p <- ggplot() + 
+  geom_histogram(data=df_knn, 
+                 aes(x = prop_score, y=after_stat(density)),
+                 fill=color.pal[1], alpha=0.7) + 
+  geom_histogram(data=df_knn, 
+                 aes(x = prop_score, y=-after_stat(density)),
+                 fill=color.pal[3], alpha=0.7) +
+  theme_minimal() +
+  labs(x="Values", y="Density")
+ggsave(p, filename="ps2_q2e_4.pdf")
+
+# ensure covariate balance
+df_knn_long <- df_knn %>% 
+  pivot_longer(-c("treated", "idnum", "sample"), names_to = "variables", 
+               "values_to" = "values") %>% 
+  mutate(treated=as.factor(treated),
+         sample_factor= ifelse(sample==1, "Experimental", "CPS")) %>% 
+  group_by(treated, variables) %>% 
+  mutate(variables=plyr::mapvalues(variables, from=covars, to=newnames))
+
+covar.balance(df_knn_long, newnames, color.pal[3], "ps2_q2e_5.pdf")
+```
+
+Step 4: Estimate ATT
+```{r,results='hide', message=FALSE, warning=FALSE}
+ps_att1 <- lm(re78 ~ treated, data=df_knn, weights=weights)
+
+control_formula <- paste("re78 ~ treated +", paste(covars, collapse="+"))
+
+ps_att2 <- lm(control_formula, data=df_knn, weights=weights)
+stargazer(ps_att1, ps_att2, covariate.labels=c("ATT", "Constant"), no.space=T,
+          header=F, keep.stat="n", dep.var.caption="", float=F,
+          dep.var.labels.include=F, omit=covars, 
+          star.cutoffs = c(0.1, 0.05, 0.01), 
+          add.lines = list(c("Controls", "No", "Yes")),
+          out="ps2_q2e.tex")
+```
+
+
+## F: Local linear regression
+
+```{r,results='hide', message=FALSE, warning=FALSE}
+df_loclin <- bind_rows(loclin(df_knn, 1), loclin(df_knn, 0)) 
+
+# ATT
+ll_att1 <- lm(smoothed_re78 ~ treated, data=df_loclin)
+ll_att2 <- lm(smoothed_re78 ~ treated, data=df_loclin, weights=weights)
+
+control_formula <- paste("re78 ~ treated +", paste(covars, collapse="+"))
+
+ll_att3 <- lm(control_formula, data=df_knn)
+stargazer(ll_att1, ll_att2, ll_att3, covariate.labels=c("ATT", "Constant"), no.space=T,
+          header=F, keep.stat="n", dep.var.caption="", float=F,
+          dep.var.labels.include=F, omit=covars, 
+          star.cutoffs = c(0.1, 0.05, 0.01), 
+          add.lines = list(c("Controls", "No", "No", "Yes"),
+                           c("Propensity Weights", "No", "Yes", "No")),
+          out="ps2_q2f.tex")
+
+# Plot predicted earnings
+df_loclin_long <- df_loclin %>% 
+  select(treated, smoothed_re78, re78, prop_score) %>% 
+  pivot_longer(-c("treated", "prop_score"), names_to = "variables", 
+               "values_to" = "values") %>% 
+  mutate(treated=as.factor(treated),
+         variables=ifelse(variables=="re78", "Raw Earnings", "Smoothed Earnings") %>% as.factor) 
+
+p <- ggplot(data=filter(df_loclin_long, treated==1)) + 
+  geom_point(aes(x=prop_score, y=values, color=variables)) +
+  scale_color_manual(values=color.pal[c(3,5)]) +
+  theme_minimal() + theme(legend.position="bottom") +
+  labs(x="Earnings", y="Propensity Score", color="Variable")
+ggsave(p, filename="ps2_q2f_1.pdf")
+
+p <- ggplot(data=filter(df_loclin_long, treated==0)) + 
+  geom_point(aes(x=prop_score, y=values, color=variables)) +
+  scale_color_manual(values=color.pal[c(3,5)]) +
+  theme_minimal() + theme(legend.position="bottom") +
+  labs(x="Earnings", y="Propensity Score", color="Variable")
+ggsave(p, filename="ps2_q2f_2.pdf")
+
+```
+
